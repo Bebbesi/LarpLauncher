@@ -1,0 +1,1 @@
+"""Minecraft Offline Launcher package."""
