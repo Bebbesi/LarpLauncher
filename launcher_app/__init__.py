@@ -1,1 +1,1 @@
-"""Minecraft Offline Launcher package."""
+"""LarpLauncher package."""

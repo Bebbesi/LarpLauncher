@@ -1,4 +1,4 @@
-# Minecraft Offline Launcher
+# LarpLauncher
 
 A Windows-friendly Minecraft offline launcher built with Python, PySide6, and
 `minecraft-launcher-lib`.
@@ -37,10 +37,10 @@ Or double-click `run_launcher.bat`.
 ## Build Single EXE
 
 ```powershell
-pyinstaller MinecraftOfflineLauncher.spec
+pyinstaller LarpLauncher.spec
 ```
 
-The executable will be created in `dist\MinecraftOfflineLauncher.exe`.
+The executable will be created in `dist\LarpLauncher.exe`.
 
 Or double-click `build_exe.bat`.
 
@@ -56,7 +56,7 @@ Or double-click `build_exe.bat`.
 Each profile gets its own directory under:
 
 ```text
-%APPDATA%\MinecraftOfflineLauncher\profile_directories
+%APPDATA%\LarpLauncher\profile_directories
 ```
 
 Use `Open Folder` in the launcher to open the selected profile directory. Put

@@ -42,10 +42,11 @@ MINECRAFT_DIRECTORY = minecraft_launcher_lib.utils.get_minecraft_directory()
 DEFAULT_VERSIONS = ["1.21", "1.20.1", "1.19.4", "1.18.2", "1.16.5", "1.12.2", "1.8.9"]
 LOADERS = ["Vanilla", "Fabric", "Forge", "NeoForge", "OptiFine"]
 APPDATA = os.environ.get("APPDATA") or os.path.expanduser("~")
-CONFIG_DIRECTORY = os.path.join(APPDATA, "MinecraftOfflineLauncher")
+CONFIG_DIRECTORY = os.path.join(APPDATA, "LarpLauncher")
 PROFILES_PATH = os.path.join(CONFIG_DIRECTORY, "profiles.json")
 PROFILE_DIRECTORIES = os.path.join(CONFIG_DIRECTORY, "profile_directories")
 MICROSOFT_REDIRECT_URI = "http://localhost"
+MICROSOFT_CLIENT_ID = "4e70895d-7499-46b2-9358-a664f3422909"
 
 
 def safe_name(value: str) -> str:
@@ -354,7 +355,7 @@ class CreateProfileDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Minecraft Offline Launcher")
+        self.setWindowTitle("LarpLauncher")
         self.setMinimumSize(980, 620)
 
         self.launch_thread: QThread | None = None
@@ -392,13 +393,6 @@ class MainWindow(QMainWindow):
         self.auth_combo.addItems(["Offline", "Microsoft"])
         self.auth_combo.currentTextChanged.connect(self._auth_mode_changed)
 
-        self.ms_client_id_input = QLineEdit()
-        self.ms_client_id_input.setPlaceholderText("Azure app Client ID")
-
-        self.ms_redirect_uri_input = QLineEdit()
-        self.ms_redirect_uri_input.setPlaceholderText(MICROSOFT_REDIRECT_URI)
-        self.ms_redirect_uri_input.setText(MICROSOFT_REDIRECT_URI)
-
         self.microsoft_login_button = QPushButton("Login Microsoft")
         self.microsoft_login_button.clicked.connect(self.login_microsoft)
 
@@ -421,6 +415,17 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Ready.")
         self.status_label.setWordWrap(True)
 
+        self.user_panel = QFrame()
+        self.user_panel.setObjectName("panel")
+        self.user_panel.setVisible(False)
+
+        self.welcome_label = QLabel("")
+        self.welcome_label.setObjectName("welcomeLabel")
+        self.login_button = QPushButton("Login Microsoft")
+        self.login_button.clicked.connect(self.login_microsoft)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self.logout_microsoft)
+
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("Install and launch details will appear here.")
@@ -432,6 +437,7 @@ class MainWindow(QMainWindow):
         self.open_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         self._ensure_default_profile()
         self._refresh_profile_list()
+        self._update_user_panel()
         self._auth_mode_changed(self.auth_combo.currentText())
         self._load_versions()
 
@@ -462,7 +468,7 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(26, 24, 26, 24)
         content_layout.setSpacing(18)
 
-        title = QLabel("Minecraft Offline Launcher")
+        title = QLabel("LarpLauncher")
         title_font = QFont()
         title_font.setPointSize(24)
         title_font.setBold(True)
@@ -470,6 +476,24 @@ class MainWindow(QMainWindow):
 
         subtitle = QLabel("Build a profile, install the files, and jump in.")
         subtitle.setObjectName("subtitle")
+
+        user_layout = QHBoxLayout(self.user_panel)
+        user_layout.setContentsMargins(12, 10, 12, 10)
+        user_layout.setSpacing(10)
+        avatar = QLabel("👤")
+        avatar.setObjectName("avatarLabel")
+        user_layout.addWidget(avatar)
+        user_text = QVBoxLayout()
+        user_text.setContentsMargins(0, 0, 0, 0)
+        user_text.setSpacing(2)
+        user_text.addWidget(self.welcome_label)
+        buttons_row = QHBoxLayout()
+        buttons_row.setContentsMargins(0, 0, 0, 0)
+        buttons_row.setSpacing(8)
+        buttons_row.addWidget(self.login_button)
+        buttons_row.addWidget(self.logout_button)
+        user_text.addLayout(buttons_row)
+        user_layout.addLayout(user_text, 1)
 
         form = QFrame()
         form.setObjectName("panel")
@@ -486,18 +510,14 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(self.username_input, 2, 1)
         form_layout.addWidget(QLabel("Account"), 3, 0)
         form_layout.addWidget(self.auth_combo, 3, 1)
-        form_layout.addWidget(QLabel("Microsoft Client ID"), 4, 0)
-        form_layout.addWidget(self.ms_client_id_input, 4, 1)
-        form_layout.addWidget(QLabel("Redirect URI"), 5, 0)
-        form_layout.addWidget(self.ms_redirect_uri_input, 5, 1)
-        form_layout.addWidget(QLabel("Microsoft Login"), 6, 0)
-        form_layout.addWidget(self.microsoft_login_button, 6, 1)
-        form_layout.addWidget(QLabel("RAM Allocation"), 7, 0)
+        form_layout.addWidget(QLabel("Microsoft Login"), 4, 0)
+        form_layout.addWidget(self.microsoft_login_button, 4, 1)
+        form_layout.addWidget(QLabel("RAM Allocation"), 5, 0)
 
         ram_row = QHBoxLayout()
         ram_row.addWidget(self.ram_slider)
         ram_row.addWidget(self.ram_label)
-        form_layout.addLayout(ram_row, 7, 1)
+        form_layout.addLayout(ram_row, 5, 1)
 
         progress_row = QHBoxLayout()
         progress_row.addWidget(self.progress_bar, 1)
@@ -509,6 +529,7 @@ class MainWindow(QMainWindow):
 
         content_layout.addWidget(title)
         content_layout.addWidget(subtitle)
+        content_layout.addWidget(self.user_panel)
         content_layout.addWidget(form)
         content_layout.addLayout(action_row)
         content_layout.addLayout(progress_row)
@@ -543,6 +564,14 @@ class MainWindow(QMainWindow):
                 color: #f6fbff;
                 font-size: 18px;
                 font-weight: 800;
+            }
+            QLabel#welcomeLabel {
+                color: #f6fbff;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            QLabel#avatarLabel {
+                font-size: 24px;
             }
             QFrame#sidebar, QFrame#content, QFrame#panel {
                 background: #111821;
@@ -778,18 +807,45 @@ class MainWindow(QMainWindow):
         profile.username = self.username_input.text().strip() or self._default_username()
         profile.ram_gb = self.ram_slider.value()
         profile.auth_mode = self.auth_combo.currentText()
-        profile.ms_client_id = self.ms_client_id_input.text().strip()
-        profile.ms_redirect_uri = self.ms_redirect_uri_input.text().strip() or MICROSOFT_REDIRECT_URI
+        profile.ms_client_id = MICROSOFT_CLIENT_ID
+        profile.ms_redirect_uri = MICROSOFT_REDIRECT_URI
         self._save_profiles()
         self._refresh_profile_list(profile.id)
         self._append_log(f"Saved profile: {profile.name}")
 
     @Slot(str)
     def _auth_mode_changed(self, mode: str) -> None:
+        profile = self._current_profile()
+        is_logged_in = bool(profile and profile.ms_refresh_token)
         enabled = mode == "Microsoft"
-        self.ms_client_id_input.setEnabled(enabled)
-        self.ms_redirect_uri_input.setEnabled(enabled)
-        self.microsoft_login_button.setEnabled(enabled)
+        self.microsoft_login_button.setEnabled(enabled and not is_logged_in)
+        self._update_user_panel()
+
+    def _update_user_panel(self) -> None:
+        profile = self._current_profile()
+        if profile and profile.ms_refresh_token:
+            self.welcome_label.setText(f"Welcome {profile.username}")
+            self.user_panel.setVisible(True)
+            self.login_button.setVisible(False)
+            self.logout_button.setVisible(True)
+        else:
+            self.welcome_label.setText("")
+            self.user_panel.setVisible(False)
+            self.login_button.setVisible(True)
+            self.logout_button.setVisible(False)
+
+    @Slot()
+    def logout_microsoft(self) -> None:
+        profile = self._current_profile()
+        if profile is None:
+            return
+        profile.ms_refresh_token = ""
+        profile.auth_mode = "Offline"
+        self.auth_combo.setCurrentText("Offline")
+        self._update_user_panel()
+        self._auth_mode_changed("Offline")
+        self._save_profiles()
+        self._refresh_profile_list(profile.id)
 
     @Slot()
     def login_microsoft(self) -> None:
@@ -797,8 +853,8 @@ class MainWindow(QMainWindow):
         if profile is None:
             return
 
-        client_id = self.ms_client_id_input.text().strip()
-        redirect_uri = self.ms_redirect_uri_input.text().strip() or MICROSOFT_REDIRECT_URI
+        client_id = MICROSOFT_CLIENT_ID
+        redirect_uri = MICROSOFT_REDIRECT_URI
         if not client_id:
             QMessageBox.warning(
                 self,
@@ -837,6 +893,7 @@ class MainWindow(QMainWindow):
         profile.username = response["name"]
         self.auth_combo.setCurrentText("Microsoft")
         self.username_input.setText(response["name"])
+        self._update_user_panel()
         self._save_profiles()
         self._refresh_profile_list(profile.id)
         QMessageBox.information(self, "Microsoft Login", f"Logged in as {response['name']}.")
@@ -889,8 +946,7 @@ class MainWindow(QMainWindow):
         auth_index = self.auth_combo.findText(profile.auth_mode)
         if auth_index >= 0:
             self.auth_combo.setCurrentIndex(auth_index)
-        self.ms_client_id_input.setText(profile.ms_client_id)
-        self.ms_redirect_uri_input.setText(profile.ms_redirect_uri or MICROSOFT_REDIRECT_URI)
+        self._update_user_panel()
         self._auth_mode_changed(self.auth_combo.currentText())
 
     def _load_versions(self) -> None:
@@ -947,8 +1003,8 @@ class MainWindow(QMainWindow):
             ram_gb=self.ram_slider.value(),
             minecraft_directory=profile.directory if profile else MINECRAFT_DIRECTORY,
             auth_mode=self.auth_combo.currentText(),
-            ms_client_id=self.ms_client_id_input.text().strip(),
-            ms_redirect_uri=self.ms_redirect_uri_input.text().strip() or MICROSOFT_REDIRECT_URI,
+            ms_client_id=MICROSOFT_CLIENT_ID,
+            ms_redirect_uri=MICROSOFT_REDIRECT_URI,
             ms_refresh_token=profile.ms_refresh_token if profile else "",
         )
 
@@ -996,7 +1052,7 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Minecraft Offline Launcher")
+    app.setApplicationName("LarpLauncher")
     window = MainWindow()
     window.show()
     return app.exec()
