@@ -41,7 +41,12 @@ from PySide6.QtWidgets import (
 MINECRAFT_DIRECTORY = minecraft_launcher_lib.utils.get_minecraft_directory()
 DEFAULT_VERSIONS = ["1.21", "1.20.1", "1.19.4", "1.18.2", "1.16.5", "1.12.2", "1.8.9"]
 LOADERS = ["Vanilla", "Fabric", "Forge", "NeoForge", "OptiFine"]
-APPDATA = os.environ.get("APPDATA") or os.path.expanduser("~")
+if "APPDATA" in os.environ:
+    APPDATA = os.environ["APPDATA"]
+elif "XDG_CONFIG_HOME" in os.environ:
+    APPDATA = os.environ["XDG_CONFIG_HOME"]
+else:
+    APPDATA = os.path.join(os.path.expanduser("~"), ".config")
 CONFIG_DIRECTORY = os.path.join(APPDATA, "LarpLauncher")
 PROFILES_PATH = os.path.join(CONFIG_DIRECTORY, "profiles.json")
 PROFILE_DIRECTORIES = os.path.join(CONFIG_DIRECTORY, "profile_directories")
@@ -544,7 +549,7 @@ class MainWindow(QMainWindow):
         try:
             return os.getlogin()
         except OSError:
-            return os.environ.get("USERNAME") or "Player"
+            return os.environ.get("USER") or os.environ.get("USERNAME") or "Player"
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(
@@ -793,7 +798,10 @@ class MainWindow(QMainWindow):
         for child in ("mods", "config", "saves", "resourcepacks", "shaderpacks"):
             os.makedirs(os.path.join(profile.directory, child), exist_ok=True)
         try:
-            os.startfile(profile.directory)  # type: ignore[attr-defined]
+            if sys.platform == "win32":
+                os.startfile(profile.directory)  # type: ignore[attr-defined]
+            else:
+                subprocess.run(["xdg-open", profile.directory], check=True)
         except OSError as exc:
             QMessageBox.critical(self, "Open Folder Failed", str(exc))
 
