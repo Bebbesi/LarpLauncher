@@ -12,7 +12,7 @@ from typing import Any
 
 import minecraft_launcher_lib
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -367,6 +367,7 @@ class MainWindow(QMainWindow):
         self.version_thread: QThread | None = None
         self.available_versions = list(DEFAULT_VERSIONS)
         self.profiles = self._load_profiles()
+        self.global_auth_state = self._load_global_auth_state()
 
         self.profile_list = QListWidget()
         self.profile_list.currentItemChanged.connect(self._profile_selected)
@@ -396,10 +397,12 @@ class MainWindow(QMainWindow):
 
         self.auth_combo = QComboBox()
         self.auth_combo.addItems(["Offline", "Microsoft"])
+        self.auth_combo.setVisible(False)
         self.auth_combo.currentTextChanged.connect(self._auth_mode_changed)
 
         self.microsoft_login_button = QPushButton("Login Microsoft")
         self.microsoft_login_button.clicked.connect(self.login_microsoft)
+        self.microsoft_login_button.setVisible(False)
 
         self.ram_slider = QSlider(Qt.Orientation.Horizontal)
         self.ram_slider.setMinimum(2)
@@ -422,7 +425,7 @@ class MainWindow(QMainWindow):
 
         self.user_panel = QFrame()
         self.user_panel.setObjectName("panel")
-        self.user_panel.setVisible(False)
+        self.user_panel.setVisible(True)
 
         self.welcome_label = QLabel("")
         self.welcome_label.setObjectName("welcomeLabel")
@@ -442,6 +445,7 @@ class MainWindow(QMainWindow):
         self.open_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         self._ensure_default_profile()
         self._refresh_profile_list()
+        self.auth_combo.setCurrentText(self.global_auth_state.get("auth_mode", "Offline"))
         self._update_user_panel()
         self._auth_mode_changed(self.auth_combo.currentText())
         self._load_versions()
@@ -482,11 +486,38 @@ class MainWindow(QMainWindow):
         subtitle = QLabel("Build a profile, install the files, and jump in.")
         subtitle.setObjectName("subtitle")
 
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(18)
+        title_column = QVBoxLayout()
+        title_column.setContentsMargins(0, 0, 0, 0)
+        title_column.setSpacing(6)
+        title_column.addWidget(title)
+        title_column.addWidget(subtitle)
+        header_row.addLayout(title_column, 1)
+
         user_layout = QHBoxLayout(self.user_panel)
         user_layout.setContentsMargins(12, 10, 12, 10)
         user_layout.setSpacing(10)
-        avatar = QLabel("👤")
+        avatar = QLabel()
         avatar.setObjectName("avatarLabel")
+        avatar.setAlignment(Qt.AlignCenter)
+        avatar_path_candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "user.png"),
+            os.path.join(os.getcwd(), "user.png"),
+            os.path.join(os.path.dirname(sys.executable), "user.png"),
+        ]
+        avatar_pixmap = None
+        for candidate in avatar_path_candidates:
+            if os.path.exists(candidate):
+                avatar_pixmap = QPixmap(candidate)
+                if not avatar_pixmap.isNull():
+                    break
+        if avatar_pixmap is not None and not avatar_pixmap.isNull():
+            avatar.setPixmap(avatar_pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            avatar.setFixedSize(48, 48)
+        else:
+            avatar.setText("👤")
         user_layout.addWidget(avatar)
         user_text = QVBoxLayout()
         user_text.setContentsMargins(0, 0, 0, 0)
@@ -513,16 +544,12 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(self.loader_combo, 1, 1)
         form_layout.addWidget(QLabel("Username"), 2, 0)
         form_layout.addWidget(self.username_input, 2, 1)
-        form_layout.addWidget(QLabel("Account"), 3, 0)
-        form_layout.addWidget(self.auth_combo, 3, 1)
-        form_layout.addWidget(QLabel("Microsoft Login"), 4, 0)
-        form_layout.addWidget(self.microsoft_login_button, 4, 1)
-        form_layout.addWidget(QLabel("RAM Allocation"), 5, 0)
+        form_layout.addWidget(QLabel("RAM Allocation"), 3, 0)
 
         ram_row = QHBoxLayout()
         ram_row.addWidget(self.ram_slider)
         ram_row.addWidget(self.ram_label)
-        form_layout.addLayout(ram_row, 5, 1)
+        form_layout.addLayout(ram_row, 3, 1)
 
         progress_row = QHBoxLayout()
         progress_row.addWidget(self.progress_bar, 1)
@@ -532,8 +559,7 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.save_profile_button)
         action_row.addWidget(self.launch_button, 1)
 
-        content_layout.addWidget(title)
-        content_layout.addWidget(subtitle)
+        content_layout.addLayout(header_row)
         content_layout.addWidget(self.user_panel)
         content_layout.addWidget(form)
         content_layout.addLayout(action_row)
@@ -696,6 +722,33 @@ class MainWindow(QMainWindow):
             """
         )
 
+    def _default_global_auth_state(self) -> dict[str, str]:
+        return {
+            "auth_mode": "Offline",
+            "ms_client_id": MICROSOFT_CLIENT_ID,
+            "ms_redirect_uri": MICROSOFT_REDIRECT_URI,
+            "ms_refresh_token": "",
+            "username": "",
+        }
+
+    def _load_global_auth_state(self) -> dict[str, str]:
+        try:
+            with open(PROFILES_PATH, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, json.JSONDecodeError, TypeError):
+            return self._default_global_auth_state()
+
+        global_auth = payload.get("global_auth")
+        if not isinstance(global_auth, dict):
+            return self._default_global_auth_state()
+
+        state = self._default_global_auth_state()
+        for key in state:
+            value = global_auth.get(key)
+            if isinstance(value, str):
+                state[key] = value
+        return state
+
     def _load_profiles(self) -> list[LauncherProfile]:
         try:
             with open(PROFILES_PATH, "r", encoding="utf-8") as file:
@@ -724,7 +777,14 @@ class MainWindow(QMainWindow):
     def _save_profiles(self) -> None:
         os.makedirs(CONFIG_DIRECTORY, exist_ok=True)
         with open(PROFILES_PATH, "w", encoding="utf-8") as file:
-            json.dump({"profiles": [asdict(profile) for profile in self.profiles]}, file, indent=2)
+            json.dump(
+                {
+                    "profiles": [asdict(profile) for profile in self.profiles],
+                    "global_auth": self.global_auth_state,
+                },
+                file,
+                indent=2,
+            )
 
     def _ensure_default_profile(self) -> None:
         if self.profiles:
@@ -814,53 +874,42 @@ class MainWindow(QMainWindow):
         profile.loader = self.loader_combo.currentText()
         profile.username = self.username_input.text().strip() or self._default_username()
         profile.ram_gb = self.ram_slider.value()
-        profile.auth_mode = self.auth_combo.currentText()
-        profile.ms_client_id = MICROSOFT_CLIENT_ID
-        profile.ms_redirect_uri = MICROSOFT_REDIRECT_URI
         self._save_profiles()
         self._refresh_profile_list(profile.id)
         self._append_log(f"Saved profile: {profile.name}")
 
     @Slot(str)
     def _auth_mode_changed(self, mode: str) -> None:
-        profile = self._current_profile()
-        is_logged_in = bool(profile and profile.ms_refresh_token)
-        enabled = mode == "Microsoft"
-        self.microsoft_login_button.setEnabled(enabled and not is_logged_in)
+        self.global_auth_state["auth_mode"] = mode
+        self._save_profiles()
         self._update_user_panel()
 
     def _update_user_panel(self) -> None:
-        profile = self._current_profile()
-        if profile and profile.ms_refresh_token:
-            self.welcome_label.setText(f"Welcome {profile.username}")
+        if self.global_auth_state.get("ms_refresh_token"):
+            self.welcome_label.setText(f"Welcome {self.global_auth_state.get('username') or self.username_input.text().strip() or 'Player'}")
             self.user_panel.setVisible(True)
             self.login_button.setVisible(False)
             self.logout_button.setVisible(True)
         else:
-            self.welcome_label.setText("")
-            self.user_panel.setVisible(False)
+            self.welcome_label.setText("Microsoft account")
+            self.user_panel.setVisible(True)
             self.login_button.setVisible(True)
             self.logout_button.setVisible(False)
 
     @Slot()
     def logout_microsoft(self) -> None:
-        profile = self._current_profile()
-        if profile is None:
-            return
-        profile.ms_refresh_token = ""
-        profile.auth_mode = "Offline"
+        self.global_auth_state["ms_refresh_token"] = ""
+        self.global_auth_state["ms_client_id"] = ""
+        self.global_auth_state["ms_redirect_uri"] = MICROSOFT_REDIRECT_URI
+        self.global_auth_state["auth_mode"] = "Offline"
+        self.global_auth_state["username"] = ""
         self.auth_combo.setCurrentText("Offline")
         self._update_user_panel()
         self._auth_mode_changed("Offline")
         self._save_profiles()
-        self._refresh_profile_list(profile.id)
 
     @Slot()
     def login_microsoft(self) -> None:
-        profile = self._current_profile()
-        if profile is None:
-            return
-
         client_id = MICROSOFT_CLIENT_ID
         redirect_uri = MICROSOFT_REDIRECT_URI
         if not client_id:
@@ -894,29 +943,25 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Microsoft Login Failed", str(exc))
             return
 
-        profile.auth_mode = "Microsoft"
-        profile.ms_client_id = client_id
-        profile.ms_redirect_uri = redirect_uri
-        profile.ms_refresh_token = response["refresh_token"]
-        profile.username = response["name"]
+        self.global_auth_state["auth_mode"] = "Microsoft"
+        self.global_auth_state["ms_client_id"] = client_id
+        self.global_auth_state["ms_redirect_uri"] = redirect_uri
+        self.global_auth_state["ms_refresh_token"] = response["refresh_token"]
+        self.global_auth_state["username"] = response["name"]
         self.auth_combo.setCurrentText("Microsoft")
         self.username_input.setText(response["name"])
         self._update_user_panel()
         self._save_profiles()
-        self._refresh_profile_list(profile.id)
         QMessageBox.information(self, "Microsoft Login", f"Logged in as {response['name']}.")
 
     @Slot(dict)
     def _microsoft_profile_refreshed(self, response: dict) -> None:
-        profile = self._current_profile()
-        if profile is None:
-            return
         refresh_token = response.get("refresh_token")
         username = response.get("name")
         if refresh_token:
-            profile.ms_refresh_token = refresh_token
+            self.global_auth_state["ms_refresh_token"] = refresh_token
         if username:
-            profile.username = username
+            self.global_auth_state["username"] = username
             self.username_input.setText(username)
         self._save_profiles()
 
@@ -951,11 +996,8 @@ class MainWindow(QMainWindow):
             self.loader_combo.setCurrentIndex(loader_index)
         self.username_input.setText(profile.username)
         self.ram_slider.setValue(profile.ram_gb)
-        auth_index = self.auth_combo.findText(profile.auth_mode)
-        if auth_index >= 0:
-            self.auth_combo.setCurrentIndex(auth_index)
         self._update_user_panel()
-        self._auth_mode_changed(self.auth_combo.currentText())
+        self._auth_mode_changed(self.global_auth_state.get("auth_mode", "Offline"))
 
     def _load_versions(self) -> None:
         self.status_label.setText("Loading version list...")
@@ -1007,13 +1049,13 @@ class MainWindow(QMainWindow):
         settings = LaunchSettings(
             version=version,
             loader=self.loader_combo.currentText(),
-            username=username or "Player",
+            username=username or self.global_auth_state.get("username") or "Player",
             ram_gb=self.ram_slider.value(),
             minecraft_directory=profile.directory if profile else MINECRAFT_DIRECTORY,
-            auth_mode=self.auth_combo.currentText(),
-            ms_client_id=MICROSOFT_CLIENT_ID,
-            ms_redirect_uri=MICROSOFT_REDIRECT_URI,
-            ms_refresh_token=profile.ms_refresh_token if profile else "",
+            auth_mode=self.global_auth_state.get("auth_mode", "Offline"),
+            ms_client_id=self.global_auth_state.get("ms_client_id", MICROSOFT_CLIENT_ID),
+            ms_redirect_uri=self.global_auth_state.get("ms_redirect_uri", MICROSOFT_REDIRECT_URI),
+            ms_refresh_token=self.global_auth_state.get("ms_refresh_token", ""),
         )
 
         os.makedirs(settings.minecraft_directory, exist_ok=True)
